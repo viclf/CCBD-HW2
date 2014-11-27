@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <script src="http://code.jquery.com/jquery-latest.js"></script>
+        <script src="//ajax.googleapis.com/ajax/libs/jquery/1.9.1/jquery.min.js"></script>
+        <meta name="viewport" content="initial-scale=1.0, user-scalable=no">
+        <meta charset="utf-8">
+        <script type="text/javascript" src="https://maps.googleapis.com/maps/api/js?libraries=visualization&sensor=true_or_false"></script>
+        <script type="text/javascript" src="//cdnjs.cloudflare.com/ajax/libs/socket.io/0.9.16/socket.io.min.js"></script>
+
+        <style>
+        html, body, #map-canvas {
+            height: 100%;
+            margin: 0px;
+            padding: 0px
+        }
+        .controls {
+            margin-top: 16px;
+            border: 1px solid transparent;
+            border-radius: 2px 0 0 2px;
+            box-sizing: border-box;
+            -moz-box-sizing: border-box;
+            height: 32px;
+            outline: none;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+        }
+        
+        #pac-input {
+            background-color: #fff;
+            padding: 0 11px 0 13px;
+            width: 400px;
+            font-family: Roboto;
+            font-size: 15px;
+            font-weight: 300;
+            text-overflow: ellipsis;
+            position: absolute;
+            top: 10px;
+            left: 110px;
+        }
+        
+        #pac-input:focus {
+            border-color: #4d90fe;
+            margin-left: -1px;
+            padding-left: 14px;  /* Regular padding-left + 1. */
+            width: 401px;
+        }
+        
+        .pac-container {
+            font-family: Roboto;
+        }
+        
+        #type-selector {
+            color: #fff;
+            background-color: #4d90fe;
+            padding: 5px 11px 0px 11px;
+        }
+        
+        #type-selector label {
+            font-family: Roboto;
+            font-size: 13px;
+            font-weight: 300;
+        }
+        
+        
+        .onoffswitch {
+            position: relative; width: 75px;
+            -webkit-user-select:none; -moz-user-select:none; -ms-user-select: none;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+
+        }
+        .onoffswitch-checkbox {
+            display: none;
+        }
+        .onoffswitch-label {
+            display: block; overflow: hidden; cursor: pointer;
+            border: 1px solid #FFFFFF; border-radius: 1px;
+        }
+        .onoffswitch-inner {
+            display: block; width: 200%; margin-left: -100%;
+            -moz-transition: margin 0.3s ease-in 0s; -webkit-transition: margin 0.3s ease-in 0s;
+            -o-transition: margin 0.3s ease-in 0s; transition: margin 0.3s ease-in 0s;
+        }
+        .onoffswitch-inner:before, .onoffswitch-inner:after {
+            display: block; float: left; width: 50%; height: 30px; padding: 0; line-height: 30px;
+            font-size: 14px; color: white; font-family: Trebuchet, Arial, sans-serif; font-weight: bold;
+            -moz-box-sizing: border-box; -webkit-box-sizing: border-box; box-sizing: border-box;
+        }
+        .onoffswitch-inner:before {
+            content: "ON";
+            padding-left: 10px;
+            background-color: #EEEEEE; color: #999999;
+        }
+        .onoffswitch-inner:after {
+            content: "OFF";
+            padding-right: 10px;
+            background-color: #EEEEEE; color: #999999;
+            text-align: right;
+        }
+        .onoffswitch-switch {
+            display: block; width: 18px; margin: 6.5px;
+            background: #FFFFFF;
+            border: 2px solid #FFFFFF; border-radius: 7px;
+            position: absolute; top: 0; bottom: 0; right: 40px;
+            -moz-transition: all 0.3s ease-in 0s; -webkit-transition: all 0.3s ease-in 0s;
+            -o-transition: all 0.3s ease-in 0s; transition: all 0.3s ease-in 0s; 
+        }
+        .onoffswitch-checkbox:checked + .onoffswitch-label .onoffswitch-inner {
+            margin-left: 0;
+        }
+        .onoffswitch-checkbox:checked + .onoffswitch-label .onoffswitch-switch {
+            right: 0px; 
+        }
+        
+        #onoff{
+            position:absolute;
+            left:550px;
+            top:26px;
+        }
+        
+        </style>
+        
+        <script>
+            
+            //init
+            var map;
+            var heatmap;
+            var tweets;
+            var HMtweets;
+            var markers=[];
+            var infoWindow = new google.maps.InfoWindow();
+            var image = 'static/tweet5.png';
+            var socketstream=io.connect('http://0.0.0.0:5000/stream');
+            var socketsent=io.connect('http://0.0.0.0:5000/sentiment');
+            
+            function initialize() {
+                          
+                    var mapOptions = {
+                            zoom: 8,
+                            center: new google.maps.LatLng(40.69847032728747, -73.9514422416687)
+                    };
+                    map = new google.maps.Map(document.getElementById('map-canvas'),mapOptions);
+                    
+                    tweets = {{tweets|safe}};
+                    this.addpoint(tweets);
+            }
+        
+        
+            //map heatMap rendering functions
+            function addpoint(tweetsArray){
+                    for (i = 0; i < tweetsArray.length; i++){
+                        var lat = tweetsArray[i][0];
+                        var long = tweetsArray[i][1];
+                        var text = tweetsArray[i][2];
+                        var myLatlng = new google.maps.LatLng(lat,long);
+                        var marker = new google.maps.Marker({position: myLatlng ,icon: image,clickable: true, animation: google.maps.Animation.DROP,content: text });
+                        google.maps.event.addListener(marker, "click", clickMarker);
+                        marker.setMap(map);
+                        markers.push(marker);
+                    }
+            }
+        
+        
+            function renderHeatMap(bool){
+                var heatMapData=[];
+                if(bool){
+                    var minVal= - minMat(HMtweets);
+                    for (i = 0; i < HMtweets.length; i++){
+                        var lat = HMtweets[i][0];
+                        var long = HMtweets[i][1];
+                        var weightVal = HMtweets[i][2];
+                        heatMapData.push({location: new google.maps.LatLng(lat, long), weight: weightVal+minVal})
+                    }
+                    console.log(heatMapData)
+                    if(heatMapData.length>0){
+                        setAllMap(null);
+                        heatmap = new google.maps.visualization.HeatmapLayer({data: heatMapData});
+                        heatmap.setMap(map);
+                    }
+                }
+                else{
+                    heatmap.setMap(null);
+                    setAllMap(map);
+                }
+            }
+        
+        
+            function setAllMap(map) {
+                for (var i = 0; i < markers.length; i++) {
+                    markers[i].setMap(map);
+                }
+            }
+
+
+            function clickMarker(){
+                if(infoWindow.getContent()){
+                    infoWindow.close(this.map, this);
+                    infoWindow.setContent();
+                }
+                else{
+                infoWindow.setContent(this.content);
+                infoWindow.open(this.map, this);
+                }
+            }
+        
+            function minMat(matrix){
+                var min =0;
+                for (i = 0; i < HMtweets.length; i++){
+                    if(HMtweets[i][2]<min){
+                        min = HMtweets[i][2];
+                    }
+                }
+                return min;
+            }
+        
+        
+            //sockets behavior stream and sentiment
+            socketstream.on('connect', function() {
+                  socketstream.emit('message',  'I\'m connected to stream!');
+                  console.log('stream');
+                  });
+                  
+            socketstream.on('disconnect', function() {
+                            socketstream.emit('message',  'I\'m disconnected from stream!');
+                            });
+                            
+            socketstream.on('pushtweet', function(msg) {
+                            socketstream.emit('message',  'tweet pushed');
+                            addpoint(msg);
+                            });
+                            
+            socketsent.on('connect', function() {
+                            socketsent.emit('message',  'I\'m connected to sentiment!');
+                            console.log('sent');
+                            });
+                                            
+            socketsent.on('disconnect', function() {
+                            socketsent.emit('message',  'I\'m disconnected from sentiment!');
+                            });
+                            
+            socketsent.on('heatMap', function(msg) {
+                            socketsent.emit('message',  'HeatMap on');
+                            HMtweets=msg
+                            renderHeatMap(true);
+                            });
+        
+        
+        
+            //heatmap on off listenner
+            function checkBoxaction(mySwitch){
+                if (mySwitch.checked){
+                    socketsent.emit('heatMap');
+                }
+                else{
+                    renderHeatMap(false)
+                }
+            }
+            
+            google.maps.event.addDomListener(window,'load',initialize);
+        </script>
+        
+        
+        
+    </head>
+    
+    <body>
+                <div id="map-canvas"></div>
+                
+                <form  action="{{ url_for('searchTweets') }}" method="POST" >
+                    <input id="pac-input" class="controls" type="text"  name="searchTweets" placeholder="Search #"/>
+                    <input type="submit" value="Send" style="position: absolute; left: -9999px; width: 1px; height: 1px;"/>
+                </form>
+                
+                <div class="onoffswitch" id="onoff">
+                    <input type="checkbox" name="onoffswitch" class="onoffswitch-checkbox" id="myonoffswitch" onchange="checkBoxaction(this);">
+                        <label class="onoffswitch-label" for="myonoffswitch">
+                            <span class="onoffswitch-inner"></span>
+                            <span class="onoffswitch-switch"></span>
+                        </label>
+                </div>
+    </body>
+    
+</html>
